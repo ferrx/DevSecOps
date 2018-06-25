@@ -63,6 +63,7 @@ Resources:
     Properties:
       VersioningConfiguration:
         Status: Enabled
+    DeletionPolicy: Retain
 
   TestCodeBuild:
     Type: AWS::CodeBuild::Project
