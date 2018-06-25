@@ -1,0 +1,168 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: >
+  AWS CloudFormation Sample Template Continuous Delievery: This template
+  builds an AWS CodePipeline pipeline that implements a continuous delivery release
+  process for AWS CloudFormation stacks. Submit a CloudFormation source artifact
+  to an Amazon S3 location before building the pipeline. The pipeline uses the
+  artifact to automatically create stacks and change sets.
+  **WARNING** This template creates an Amazon EC2 instance. You will be billed
+  for the AWS resources used when you create a stack using this template.
+
+Parameters:
+  PipelineName:
+    Description: A name for pipeline
+    Type: String
+  GitHubAccountName:
+    Description: GitHub account name that contains target repo
+    Type: String
+  GitHubRepoName:
+    Description: Target GitHub repo that contains source code test branch
+    Type: String 
+  GitHubRepoTestBranchName:
+    Description: Name of test branch that contains source coce
+    Type: String
+  GitHubOAuthToken:
+    Description: GitHub Account OAuth Token with repo and admin:repo_hook access
+    Type: String
+  TestBuildSpecYMLName:
+    Description: Name of BuildSpec YML file in for test build
+    Type: String
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "CodePipeline Settings"
+        Parameters:
+          - PipelineName
+      - Label:
+          default: "GitHub Settings"
+        Parameters:
+          - GitHubAccountName
+          - GitHubRepoName
+          - GitHubOAuthToken
+      - Label:
+          default: "GitHub Test Branch Settings"
+        Parameters:
+          - GitHubRepoTestBranchName
+          - TestBuildSpecYMLName
+
+Resources:
+  ArtifactStoreBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      VersioningConfiguration:
+        Status: Enabled
+
+  TestCodeBuild:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: TestCodeBuild
+      Description: This is the CodeBuild service for the test branch source code
+      ServiceRole: 
+        Fn::GetAtt: [CodeBuildRole, Arn]
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/ubuntu-base:14.04
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: !Ref TestBuildSpecYMLName
+      TimeoutInMinutes: 10
+
+  Pipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      ArtifactStore:
+        Location: !Ref 'ArtifactStoreBucket'
+        Type: S3
+      DisableInboundStageTransitions: []
+      Name: !Ref 'PipelineName'
+      RoleArn: !GetAtt [PipelineRole, Arn]
+      Stages:
+        - Name: GitSourceTest
+          Actions:
+            - Name: CodeSource
+              ActionTypeId:
+                Category: Source
+                Owner: ThirdParty
+                Provider: GitHub
+                Version: '1'
+              Configuration:
+                Owner: !Ref 'GitHubAccountName'
+                Repo: !Ref 'GitHubRepoName'
+                Branch: !Ref 'GitHubRepoTestBranchName'
+                OAuthToken: !Ref 'GitHubOAuthToken'
+              OutputArtifacts:
+                - Name: CodeSourceOutput
+              RunOrder: '1'
+        - Name: BuildTest
+          Actions:
+            - Name: BuildTest
+              InputArtifacts:
+                - Name: CodeSourceOutput
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: '1'
+                Provider: CodeBuild
+              Configuration:
+                ProjectName:
+                  Ref: TestCodeBuild
+              RunOrder: '1'
+
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Action: ['sts:AssumeRole']
+          Effect: Allow
+          Principal:
+            Service: [codebuild.amazonaws.com]
+        Version: '2012-10-17'
+      Path: /
+      Policies:
+        - PolicyName: CodeBuildRole
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                  - 'ecs:*'
+                Effect: Allow
+                Resource: '*'
+              
+  PipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Action: ['sts:AssumeRole']
+          Effect: Allow
+          Principal:
+            Service: [codepipeline.amazonaws.com]
+        Version: '2012-10-17'
+      Path: /
+      Policies:
+        - PolicyName: CodePipelineAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                - 's3:*'
+                - 'cloudformation:CreateStack'
+                - 'cloudformation:DescribeStacks'
+                - 'cloudformation:DeleteStack'
+                - 'cloudformation:UpdateStack'
+                - 'cloudformation:CreateChangeSet'
+                - 'cloudformation:ExecuteChangeSet'
+                - 'cloudformation:DeleteChangeSet'
+                - 'cloudformation:DescribeChangeSet'
+                - 'cloudformation:SetStackPolicy'
+                - 'iam:PassRole'
+                - 'sns:Publish'
+                Effect: Allow
+                Resource: '*'
