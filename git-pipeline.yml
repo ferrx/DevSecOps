@@ -232,5 +232,7 @@ Resources:
                 - 'cloudformation:SetStackPolicy'
                 - 'iam:PassRole'
                 - 'sns:Publish'
+                - 'codebuild:StartBuild'
+                - 'codebuild:BatchGetBuilds'
                 Effect: Allow
                 Resource: '*'
