@@ -1,11 +1,14 @@
 AWSTemplateFormatVersion: "2010-09-09"
 
 Description: >
-  AWS CloudFormation Template for GitFlow-compatible CodePipeline infrastructure.
+  AWS CloudFormation Template for GitFlow-compatible CodePipeline infrastructure that watches source code on a GitHub repo that has a branch for testing and release.
 
 Parameters:
-  PipelineName:
-    Description: A name for pipeline
+  TestPipelineName:
+    Description: Name for AWS CodePipeline for the Test branch
+    Type: String
+  ReleasePipelineName:
+    Description: Name for AWS CodePipeline for the Release branch
     Type: String
   GitHubAccountName:
     Description: GitHub account name that contains target repo
@@ -16,11 +19,17 @@ Parameters:
   GitHubRepoTestBranchName:
     Description: Name of test branch that contains source coce
     Type: String
+  GitHubRepoReleaseBranchName:
+    Description: Name of release branch that contains source coce
+    Type: String
   GitHubOAuthToken:
     Description: GitHub Account OAuth Token with repo and admin:repo_hook access
     Type: String
   TestBuildSpecYMLName:
     Description: Name of BuildSpec YML file in for test build
+    Type: String
+  ReleaseBuildSpecYMLName:
+    Description: Name of BuildSpec YML file in for release build
     Type: String
 
 Metadata:
@@ -29,7 +38,8 @@ Metadata:
       - Label:
           default: "CodePipeline Settings"
         Parameters:
-          - PipelineName
+          - TestPipelineName
+          - ReleasePipelineName
       - Label:
           default: "GitHub Settings"
         Parameters:
@@ -41,6 +51,11 @@ Metadata:
         Parameters:
           - GitHubRepoTestBranchName
           - TestBuildSpecYMLName
+      - Label:
+          default: "GitHub Release Branch Settings"
+        Parameters:
+          - GitHubRepoReleaseBranchName
+          - ReleaseBuildSpecYMLName
 
 Resources:
   ArtifactStoreBucket:
@@ -67,14 +82,32 @@ Resources:
         BuildSpec: !Ref TestBuildSpecYMLName
       TimeoutInMinutes: 10
 
-  Pipeline:
+  ReleaseCodeBuild:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: ReleaseCodeBuild
+      Description: This is the CodeBuild service for the Release branch source code
+      ServiceRole: 
+        Fn::GetAtt: [CodeBuildRole, Arn]
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/ubuntu-base:14.04
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: !Ref ReleaseBuildSpecYMLName
+      TimeoutInMinutes: 10
+
+  TestPipeline:
     Type: AWS::CodePipeline::Pipeline
     Properties:
       ArtifactStore:
         Location: !Ref 'ArtifactStoreBucket'
         Type: S3
       DisableInboundStageTransitions: []
-      Name: !Ref 'PipelineName'
+      Name: !Ref 'TestPipelineName'
       RoleArn: !GetAtt [PipelineRole, Arn]
       Stages:
         - Name: GitSourceTest
@@ -106,6 +139,47 @@ Resources:
               Configuration:
                 ProjectName:
                   Ref: TestCodeBuild
+              RunOrder: '1'
+
+  ReleasePipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      ArtifactStore:
+        Location: !Ref 'ArtifactStoreBucket'
+        Type: S3
+      DisableInboundStageTransitions: []
+      Name: !Ref 'ReleasePipelineName'
+      RoleArn: !GetAtt [PipelineRole, Arn]
+      Stages:
+        - Name: GitSourceRelease
+          Actions:
+            - Name: CodeSource
+              ActionTypeId:
+                Category: Source
+                Owner: ThirdParty
+                Provider: GitHub
+                Version: '1'
+              Configuration:
+                Owner: !Ref 'GitHubAccountName'
+                Repo: !Ref 'GitHubRepoName'
+                Branch: !Ref 'GitHubRepoReleaseBranchName'
+                OAuthToken: !Ref 'GitHubOAuthToken'
+              OutputArtifacts:
+                - Name: CodeSourceOutput
+              RunOrder: '1'
+        - Name: BuildRelease
+          Actions:
+            - Name: BuildRelease
+              InputArtifacts:
+                - Name: CodeSourceOutput
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: '1'
+                Provider: CodeBuild
+              Configuration:
+                ProjectName:
+                  Ref: ReleaseCodeBuild
               RunOrder: '1'
 
   CodeBuildRole:
