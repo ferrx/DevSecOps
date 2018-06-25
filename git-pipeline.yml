@@ -200,6 +200,7 @@ Resources:
             Statement:
               - Action:
                   - 'ecs:*'
+                  - 'logs:*'
                 Effect: Allow
                 Resource: '*'
               
